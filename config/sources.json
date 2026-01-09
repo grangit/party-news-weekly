@@ -1,0 +1,128 @@
+[
+  {
+    "id": "basicincomeparty_briefing",
+    "party": "기본소득당",
+    "site": "basicincomeparty",
+    "category": "브리핑",
+    "list_url": "https://www.basicincomeparty.kr/news/briefing"
+  },
+  {
+    "id": "basicincomeparty_press",
+    "party": "기본소득당",
+    "site": "basicincomeparty",
+    "category": "언론보도",
+    "list_url": "https://www.basicincomeparty.kr/news/press"
+  },
+  {
+    "id": "samindang_briefing",
+    "party": "사회민주당",
+    "site": "samindang",
+    "category": "브리핑",
+    "list_url": "https://www.samindang.kr/news/briefing"
+  },
+  {
+    "id": "rebuilding_press_conference",
+    "party": "조국혁신당",
+    "site": "rebuildingkoreaparty",
+    "category": "기자회견",
+    "list_url": "https://rebuildingkoreaparty.kr/news/press-conference"
+  },
+  {
+    "id": "rebuilding_commentary_briefing",
+    "party": "조국혁신당",
+    "site": "rebuildingkoreaparty",
+    "category": "논평브리핑",
+    "list_url": "https://rebuildingkoreaparty.kr/news/commentary-briefing"
+  },
+  {
+    "id": "rebuilding_press_release",
+    "party": "조국혁신당",
+    "site": "rebuildingkoreaparty",
+    "category": "보도자료",
+    "list_url": "https://rebuildingkoreaparty.kr/news/press-release"
+  },
+  {
+    "id": "jinbo_category_315",
+    "party": "진보당",
+    "site": "jinboparty",
+    "category": "모두발언",
+    "list_url": "https://jinboparty.com/pages/?p=315&b=b_1_125"
+  },
+  {
+    "id": "jinbo_commentary",
+    "party": "진보당",
+    "site": "jinboparty",
+    "category": "논평",
+    "list_url": "https://jinboparty.com/pages/?p=15&b=b_1_2"
+  },
+  {
+    "id": "jinbo_category_316",
+    "party": "진보당",
+    "site": "jinboparty",
+    "category": "정책논평",
+    "list_url": "https://jinboparty.com/pages/?p=316&b=b_1_126"
+  },
+  {
+    "id": "jinbo_category_286",
+    "party": "진보당",
+    "site": "jinboparty",
+    "category": "보도자료",
+    "list_url": "https://jinboparty.com/pages/?p=286&b=b_1_111"
+  },
+  {
+    "id": "labor_notice",
+    "party": "노동당",
+    "site": "laborparty",
+    "category": "브리핑",
+    "list_url": "http://www.laborparty.kr/?page_id=13922"
+  },
+  {
+    "id": "labor_category_13642",
+    "party": "노동당",
+    "site": "laborparty",
+    "category": "논평",
+    "list_url": "http://www.laborparty.kr/?page_id=13642"
+  },
+  {
+    "id": "kgreens_press",
+    "party": "녹색당",
+    "site": "kgreens",
+    "category": "보도자료",
+    "list_url": "https://www.kgreens.org/press"
+  },
+  {
+    "id": "kgreens_event",
+    "party": "녹색당",
+    "site": "kgreens",
+    "category": "활동보고",
+    "list_url": "https://www.kgreens.org/event"
+  },
+  {
+    "id": "kgreens_statement",
+    "party": "녹색당",
+    "site": "kgreens",
+    "category": "논평",
+    "list_url": "https://www.kgreens.org/statement"
+  },
+  {
+    "id": "kgreens_statement2",
+    "party": "녹색당",
+    "site": "kgreens",
+    "category": "논평",
+    "list_url": "https://www.kgreens.org/statement2"
+  },
+  {
+    "id": "kgreens_address",
+    "party": "녹색당",
+    "site": "kgreens",
+    "category": "발언",
+    "list_url": "https://www.kgreens.org/address"
+  },
+  {
+    "id": "justice21_board",
+    "party": "정의당",
+    "site": "justice21",
+    "category": "브리핑룸",
+    "list_url": "https://www.justice21.org/newhome/board/board.html?bbs_code=JS21"
+  }
+]
