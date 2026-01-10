@@ -9,6 +9,19 @@ from urllib.parse import parse_qs, urljoin, urlparse, urlencode
 import requests
 from bs4 import BeautifulSoup
 
+# Selenium imports (optional, only used for JS-rendered sites)
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import TimeoutException, WebDriverException
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    SELENIUM_AVAILABLE = False
+
 # ----------------------------
 # Core models
 # ----------------------------
@@ -125,13 +138,39 @@ def notion_create_page(
     database_id: str,
     item: ListItem,
     title_prop: str,
+    db_props: dict,
 ) -> str:
+    """
+    Create a Notion page with properties matching the database schema.
+    Automatically detects property types (rich_text, select, etc.)
+    """
     properties = {
         title_prop: {"title": [{"text": {"content": item.title}}]},
-        "정당": {"rich_text": [{"text": {"content": item.party}}]},
-        "카테고리": {"rich_text": [{"text": {"content": item.category}}]},
         "링크": {"url": item.url},
     }
+
+    # Handle "정당" property - can be rich_text or select
+    if "정당" in db_props:
+        prop_type = db_props["정당"].get("type")
+        if prop_type == "select":
+            properties["정당"] = {"select": {"name": item.party}}
+        elif prop_type == "rich_text":
+            properties["정당"] = {"rich_text": [{"text": {"content": item.party}}]}
+        # Fall back to rich_text if type is unexpected
+        else:
+            properties["정당"] = {"rich_text": [{"text": {"content": item.party}}]}
+
+    # Handle "카테고리" property - can be rich_text or select
+    if "카테고리" in db_props:
+        prop_type = db_props["카테고리"].get("type")
+        if prop_type == "select":
+            properties["카테고리"] = {"select": {"name": item.category}}
+        elif prop_type == "rich_text":
+            properties["카테고리"] = {"rich_text": [{"text": {"content": item.category}}]}
+        else:
+            properties["카테고리"] = {"rich_text": [{"text": {"content": item.category}}]}
+
+    # Handle "날짜" property
     if item.date:
         properties["날짜"] = {"date": {"start": item.date}}
 
@@ -182,6 +221,7 @@ DETAIL_DOMAIN_ALLOWLIST = {
     "basicincomeparty.kr",
     "www.samindang.kr",
     "samindang.kr",
+    "blog.naver.com",  # 사회민주당 블로그
     "rebuildingkoreaparty.kr",
     "www.rebuildingkoreaparty.kr",
     "jinboparty.com",
@@ -196,26 +236,78 @@ DETAIL_DOMAIN_ALLOWLIST = {
 
 
 def build_paragraph_blocks(paragraphs: List[str]) -> List[dict]:
+    """
+    Build Notion paragraph blocks from text paragraphs.
+    Notion has a 2000 character limit per text block, so we split long paragraphs.
+    """
     blocks: List[dict] = []
+    MAX_LENGTH = 2000
+
     for p in paragraphs:
         text = p.strip()
         if not text:
             continue
-        blocks.append({"type": "paragraph", "paragraph": {"rich_text": [{"text": {"content": text}}]}})
+
+        # Split long paragraphs into chunks of max 2000 characters
+        if len(text) <= MAX_LENGTH:
+            blocks.append({"type": "paragraph", "paragraph": {"rich_text": [{"text": {"content": text}}]}})
+        else:
+            # Split at sentence boundaries if possible
+            chunks = []
+            current_chunk = ""
+
+            # Try to split at sentences (. ! ?)
+            sentences = re.split(r'([.!?]\s+)', text)
+
+            for i in range(0, len(sentences), 2):
+                sentence = sentences[i]
+                separator = sentences[i + 1] if i + 1 < len(sentences) else ""
+                full_sentence = sentence + separator
+
+                if len(current_chunk) + len(full_sentence) <= MAX_LENGTH:
+                    current_chunk += full_sentence
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk.strip())
+
+                    # If single sentence is too long, force split
+                    if len(full_sentence) > MAX_LENGTH:
+                        for j in range(0, len(full_sentence), MAX_LENGTH):
+                            chunks.append(full_sentence[j:j + MAX_LENGTH].strip())
+                        current_chunk = ""
+                    else:
+                        current_chunk = full_sentence
+
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+
+            # Add all chunks as separate blocks
+            for chunk in chunks:
+                if chunk:
+                    blocks.append({"type": "paragraph", "paragraph": {"rich_text": [{"text": {"content": chunk}}]}})
+
     return blocks
 
 
 def extract_paragraphs_from_element(el: Optional[BeautifulSoup]) -> List[str]:
     if not el:
         return []
+
+    # Make a copy to avoid modifying the original
+    el_copy = BeautifulSoup(str(el), 'html.parser')
+
+    # Remove KBoard meta elements (for 노동당)
+    for unwanted in el_copy.select('.kboard-title, .kboard-detail, .kboard-document-action, .kboard-document-navi, .kboard-control, .kboard-document-info, .kboard-attr'):
+        unwanted.decompose()
+
     paras = []
-    for p in el.select("p"):
+    for p in el_copy.select("p"):
         txt = p.get_text(" ", strip=True)
         if txt:
             paras.append(txt)
     if paras:
         return paras
-    text = el.get_text("\n", strip=True)
+    text = el_copy.get_text("\n", strip=True)
     return [t.strip() for t in text.splitlines() if t.strip()]
 
 
@@ -229,27 +321,101 @@ def extract_date_from_soup(soup: BeautifulSoup) -> Optional[str]:
     return extract_date_from_text(soup.get_text(" ", strip=True))
 
 
+def fetch_with_selenium(url: str, wait_selector: Optional[str] = None, wait_timeout: int = 10) -> str:
+    """
+    Fetch a page using Selenium (for JS-rendered sites).
+
+    Args:
+        url: The URL to fetch
+        wait_selector: CSS selector to wait for before extracting HTML (optional)
+        wait_timeout: Maximum time to wait for the selector (seconds)
+
+    Returns:
+        The fully-rendered HTML as a string
+    """
+    if not SELENIUM_AVAILABLE:
+        raise RuntimeError("Selenium is not installed. Install it with: pip install selenium")
+
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument(f"user-agent={UA}")
+
+    driver = None
+    try:
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.get(url)
+
+        # Wait for specific selector if provided
+        if wait_selector:
+            try:
+                WebDriverWait(driver, wait_timeout).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, wait_selector))
+                )
+            except TimeoutException:
+                # Continue anyway, maybe the content loaded differently
+                pass
+        else:
+            # Generic wait for page load
+            time.sleep(3)
+
+        html = driver.page_source
+        return html
+    finally:
+        if driver:
+            driver.quit()
+
+
 def fetch_detail_for_notion(session: requests.Session, url: str) -> Tuple[Optional[str], List[str]]:
     parsed = urlparse(url)
     if parsed.netloc not in DETAIL_DOMAIN_ALLOWLIST:
         return None, []
 
-    html = fetch_html(session, url, headers={"Referer": url}, encoding="auto")
+    # Determine if we need Selenium for this site
+    use_selenium = False
+    wait_selector = None
+
+    if "rebuildingkoreaparty.kr" in parsed.netloc:
+        # 조국혁신당: JavaScript-rendered (Next.js)
+        use_selenium = True
+        wait_selector = None  # Use generic 3-second wait
+    elif "jinboparty.com" in parsed.netloc:
+        # 진보당: JS-rendered content
+        use_selenium = True
+        wait_selector = ".content_box"
+
+    if use_selenium and SELENIUM_AVAILABLE:
+        try:
+            html = fetch_with_selenium(url, wait_selector=wait_selector, wait_timeout=10)
+        except Exception as e:
+            print(f"[WARN] Selenium failed for {url}, falling back to requests: {e}")
+            html = fetch_html(session, url, headers={"Referer": url}, encoding="auto")
+    else:
+        html = fetch_html(session, url, headers={"Referer": url}, encoding="auto")
+
     soup = BeautifulSoup(html, "html.parser")
 
     date = extract_date_from_soup(soup)
     content_el = None
 
-    # Site-specific selectors
+    # Site-specific selectors (in priority order)
     selectors = [
-        ".view_content",  # samindang
-        ".kboard-document .kboard-content",  # kboard
+        ".ck-content",  # 조국혁신당 (CKEditor)
+        "article.newsArticle",  # 조국혁신당 (old structure)
+        ".fr-view",  # 녹색당 (Froala editor)
+        "div.content",  # 정의당 (board view content)
+        ".content_box",  # 진보당
+        ".view_content",  # 사회민주당
+        ".kboard-document .kboard-content",  # 노동당 (KBoard)
         ".kboard-document-content",
-        ".entry-content",
+        ".entry-content",  # 기본소득당
         ".view-content",
         ".board_view .content",
         ".board_view_content",
         ".article_content",
+        "#contents",
         ".contents",
         "article",
     ]
@@ -315,7 +481,7 @@ def upload_to_notion(items: List[ListItem]) -> None:
                     url=it.url,
                     date=detail_date,
                 )
-            page_id = notion_create_page(token, database_id, it, title_prop)
+            page_id = notion_create_page(token, database_id, it, title_prop, props)
             blocks = build_paragraph_blocks(paragraphs)
             notion_append_children(token, page_id, blocks)
             created += 1
@@ -1080,6 +1246,10 @@ def list_kgreens(session: requests.Session, t: Target) -> List[ListItem]:
 
     글 링크는 보통 다음 형태:
     /press/?bmode=view&idx=...&t=board
+
+    녹색당 사이트는 ul.li_body 구조를 사용하며, 각 ul 안에:
+    - a[href*="bmode=view"] - 제목 링크
+    - li.time - 날짜 정보 (YYYY-MM-DD 형식)
     """
     html = fetch_html(session, t.list_url)
     soup = BeautifulSoup(html, "html.parser")
@@ -1087,7 +1257,15 @@ def list_kgreens(session: requests.Session, t: Target) -> List[ListItem]:
     out: List[ListItem] = []
     seen = set()
 
-    for a in soup.select('a[href*="bmode=view"][href*="idx="]'):
+    # Find all ul.li_body elements
+    li_bodies = soup.find_all('ul', class_='li_body')
+
+    for li_body in li_bodies:
+        # Find the title link within this li_body - look for list_text_title class
+        a = li_body.find('a', class_='list_text_title')
+        if not a:
+            continue
+
         href = (a.get("href") or "").strip()
         if not href:
             continue
@@ -1100,8 +1278,18 @@ def list_kgreens(session: requests.Session, t: Target) -> List[ListItem]:
         if not title or len(title) < 6:
             continue
 
+        # Extract date from li.time element
+        date = None
+        date_li = li_body.find('li', class_='time')
+        if date_li:
+            # Try to get from title attribute first (has full datetime)
+            date_text = date_li.get('title', '') or date_li.get_text(strip=True)
+            if date_text:
+                # Extract YYYY-MM-DD format
+                date = extract_date_from_text(date_text)
+
         seen.add(abs_url)
-        out.append(ListItem(party=t.party, category=t.category, title=title, url=abs_url))
+        out.append(ListItem(party=t.party, category=t.category, title=title, url=abs_url, date=date))
 
     return out
 
@@ -1163,7 +1351,13 @@ def list_justice21(session: requests.Session, t: Target) -> List[ListItem]:
             continue
         seen.add(abs_url)
 
-        out.append(ListItem(party=t.party, category=t.category, title=title, url=abs_url))
+        # Try to extract date from the parent row/list item
+        date = None
+        parent = a.find_parent(['tr', 'li', 'div'])
+        if parent:
+            date = extract_date_from_text(parent.get_text(" ", strip=True))
+
+        out.append(ListItem(party=t.party, category=t.category, title=title, url=abs_url, date=date))
 
     return out
 
@@ -1224,6 +1418,7 @@ def run_list_only(targets: Iterable[Target], per_site_delay_sec: float = 1.2) ->
 
 def main() -> int:
     import argparse
+    from datetime import datetime
 
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="config/sources.json", help="targets config JSON path")
@@ -1233,6 +1428,7 @@ def main() -> int:
     p.add_argument("--sample", type=int, default=15, help="how many sample items to print")
     p.add_argument("--debug", default="", help="comma-separated site ids for diagnostics")
     p.add_argument("--notion", action="store_true", help="upload results to Notion database")
+    p.add_argument("--date-from", default="", help="filter items from this date (YYYY-MM-DD), e.g., 2026-01-01")
     args = p.parse_args()
 
     global DEBUG_SITES
@@ -1248,6 +1444,34 @@ def main() -> int:
         targets = [t for t in targets if t.id == args.only_id]
 
     items = run_list_only(targets)
+
+    # Filter by date if specified
+    if args.date_from:
+        try:
+            cutoff_date = datetime.strptime(args.date_from, "%Y-%m-%d").date()
+            filtered_items = []
+            skipped_no_date = 0
+
+            for it in items:
+                if it.date:
+                    try:
+                        item_date = datetime.strptime(it.date, "%Y-%m-%d").date()
+                        if item_date >= cutoff_date:
+                            filtered_items.append(it)
+                    except ValueError:
+                        # If date parsing fails, keep the item (might be recent)
+                        filtered_items.append(it)
+                        skipped_no_date += 1
+                else:
+                    # If no date, keep the item (might be recent)
+                    filtered_items.append(it)
+                    skipped_no_date += 1
+
+            original_count = len(items)
+            items = filtered_items
+            print(f"[INFO] Filtered by date >= {args.date_from}: {len(items)}/{original_count} items ({skipped_no_date} items kept without dates)")
+        except ValueError:
+            print(f"[WARN] Invalid date format: {args.date_from}. Expected YYYY-MM-DD. Skipping filter.")
 
     print(f"\n==== 샘플 출력 (최대 {args.sample}개) ====")
     for it in items[: args.sample]:
