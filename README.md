@@ -96,6 +96,33 @@ python src/main.py --only-category 논평 --sample 10
 python src/main.py --sample 5 --notion
 ```
 
+### 자동 스케줄링 (하루 3회 실행)
+
+하루 3회 자동으로 크롤링하려면 스케줄러를 사용하세요:
+
+```bash
+python scheduler.py
+```
+
+기본 스케줄:
+- 오전 10:30
+- 오후 15:30 (3:30 PM)
+- 저녁 19:30 (7:30 PM)
+
+스케줄러는 각 정당에서 최신 3개 게시물을 자동으로 수집하여 Notion에 업로드합니다. 프로그램을 종료하려면 `Ctrl+C`를 누르세요.
+
+**백그라운드에서 계속 실행하려면:**
+
+Windows (PowerShell):
+```powershell
+Start-Process python -ArgumentList "scheduler.py" -WindowStyle Hidden
+```
+
+Linux/macOS:
+```bash
+nohup python scheduler.py > scheduler.log 2>&1 &
+```
+
 ## Notion 데이터베이스 설정
 
 Notion 데이터베이스는 다음 속성을 가져야 합니다:

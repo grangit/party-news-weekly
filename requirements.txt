@@ -3,3 +3,4 @@ beautifulsoup4
 python-dateutil
 urllib3<2
 selenium
+schedule
