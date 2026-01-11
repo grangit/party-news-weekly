@@ -5,9 +5,13 @@
 - Windows/macOS 부팅 시 자동 실행용
 """
 
+import os
 import subprocess
 import sys
 from datetime import datetime
+
+# 스크립트가 있는 디렉토리로 이동
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 
 def main():
@@ -26,7 +30,8 @@ def main():
             ],
             capture_output=True,
             text=True,
-            encoding="utf-8",
+            encoding="cp949",  # Windows 한글 인코딩
+            errors="replace",
         )
 
         print(result.stdout)
