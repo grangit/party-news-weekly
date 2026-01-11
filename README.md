@@ -98,16 +98,37 @@ python src/main.py --sample 5 --notion
 
 ### 자동 스케줄링 (하루 3회 실행)
 
-하루 3회 자동으로 크롤링하려면 스케줄러를 사용하세요:
+#### 옵션 1: GitHub Actions (권장 - 무료, 24시간 자동 실행)
+
+GitHub Actions를 사용하면 컴퓨터를 켜두지 않아도 자동으로 크롤링됩니다.
+
+**설정 방법:**
+
+1. GitHub 리포지토리의 **Settings** → **Secrets and variables** → **Actions** 이동
+
+2. **New repository secret** 클릭하여 2개 추가:
+   - Name: `NOTION_TOKEN`
+     Value: (Notion Integration Token)
+   - Name: `NOTION_DATABASE_ID`
+     Value: (Notion Database ID)
+
+3. 완료! 매일 자동으로 실행됩니다:
+   - 오전 10:30 (KST)
+   - 오후 15:30 (KST)
+   - 저녁 19:30 (KST)
+
+4. 수동 실행: **Actions** 탭 → **Auto Crawl Party News** → **Run workflow**
+
+**실행 로그 확인:**
+- GitHub 리포지토리 **Actions** 탭에서 확인 가능
+
+#### 옵션 2: 로컬 스케줄러 (컴퓨터 켜둬야 함)
+
+로컬에서 스케줄러를 실행하려면:
 
 ```bash
 python scheduler.py
 ```
-
-기본 스케줄:
-- 오전 10:30
-- 오후 15:30 (3:30 PM)
-- 저녁 19:30 (7:30 PM)
 
 스케줄러는 각 정당에서 최신 3개 게시물을 자동으로 수집하여 Notion에 업로드합니다. 프로그램을 종료하려면 `Ctrl+C`를 누르세요.
 
