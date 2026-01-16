@@ -6,18 +6,23 @@
 
 - 목록 페이지에서 글 제목, URL, 날짜 자동 수집
 - 상세 페이지 본문을 Notion 페이지에 문단 블록으로 저장
-- JavaScript로 렌더링되는 사이트도 Selenium으로 처리
-- 중복 체크 (URL 기준)
+- 조국혁신당: API에서 직접 본문 추출 (Selenium 불필요)
+- 진보당: Selenium으로 JavaScript 렌더링 처리
+- URL 정규화를 통한 중복 체크 (http/https, www, trailing slash 등 통일)
 
 ## 지원 정당
 
-- 기본소득당
-- 사회민주당
-- **조국혁신당** (JavaScript 렌더링 ✓)
-- **진보당** (JavaScript 렌더링 ✓)
-- 노동당
-- 녹색당
-- 정의당
+| 정당 | 카테고리 | 크롤링 방식 |
+|------|---------|------------|
+| 기본소득당 | 브리핑, 언론보도 | HTML 파싱 |
+| 사회민주당 | 브리핑 | HTML 파싱 |
+| 조국혁신당 | 기자회견, 논평브리핑, 보도자료 | **API 직접 호출** |
+| 진보당 | 모두발언, 논평, 정책논평, 보도자료 | Selenium (로컬 전용) |
+| 노동당 | 브리핑, 논평 | HTML 파싱 |
+| 녹색당 | 보도자료, 활동보고, 논평, 발언 | HTML 파싱 |
+| 정의당 | 브리핑룸 | HTML 파싱 |
+
+> **참고**: 진보당은 GitHub Actions에서 IP 차단되어 로컬에서만 크롤링 가능합니다.
 
 ## 설치
 
@@ -156,21 +161,49 @@ Notion 데이터베이스는 다음 속성을 가져야 합니다:
 
 ## 기술적 세부사항
 
-### JavaScript 렌더링 처리
+### 조국혁신당 API
 
-조국혁신당과 진보당은 Next.js/React 기반으로 JavaScript로 콘텐츠를 동적으로 렌더링합니다. 이를 처리하기 위해:
+조국혁신당은 Next.js 기반이지만, 내부 API를 직접 호출하여 본문을 가져옵니다:
 
-- Selenium WebDriver를 사용하여 실제 브라우저(Chrome) 실행
-- Headless 모드로 실행되어 GUI 불필요
-- 페이지 로드 후 특정 셀렉터가 나타날 때까지 대기
-- 렌더링된 HTML에서 본문 추출
+```
+POST https://api.rebuildingkoreaparty.kr/api/board/list
+{
+  "page": 1,
+  "categoryId": 7,  // 6=기자회견문, 7=논평브리핑, 9=보도자료
+  "recordSize": 10,
+  "order": "recent"
+}
+```
+
+API 응답의 `descriptionText` 필드에서 본문을 추출하므로 Selenium이 필요 없습니다.
+
+### 진보당 Selenium 처리
+
+진보당은 JavaScript로 콘텐츠를 동적으로 렌더링하므로 Selenium이 필요합니다:
+
+- Headless Chrome으로 실행
+- `.content_box` 셀렉터가 로드될 때까지 대기
+- GitHub Actions에서는 IP 차단으로 인해 로컬 전용 스크립트 `crawl_jinboparty.py` 사용
+
+### URL 정규화
+
+중복 체크 시 URL을 정규화하여 비교합니다:
+- `http` → `https` 통일
+- `www.` 제거
+- trailing slash 제거
+- 불필요한 쿼리 파라미터 제거 (page, utm_* 등)
 
 ### 사이트별 셀렉터
 
-- **조국혁신당**: `.ck-content`, `.editor` (CKEditor)
-- **진보당**: `.content_box`
-- **사회민주당**: `.view_content`
-- **기타**: `.kboard-document .kboard-content`, `.entry-content` 등
+| 정당 | 본문 셀렉터 |
+|------|-----------|
+| 조국혁신당 | API `descriptionText` |
+| 진보당 | `.content_box` |
+| 사회민주당 | `.view_content` |
+| 기본소득당 | `.entry-content` |
+| 노동당 | `.kboard-document .kboard-content` |
+| 녹색당 | `.fr-view` (Froala editor) |
+| 정의당 | `div.content` |
 
 ## 문제 해결
 
@@ -194,6 +227,13 @@ chcp 65001  # UTF-8로 변경
 ```
 
 ## 최근 변경사항
+
+- **2026-01-16**: 조국혁신당 크롤링 개선
+  - API categoryId 매핑 수정 (기자회견=6, 논평브리핑=7, 보도자료=9)
+  - API `descriptionText`에서 직접 본문 추출 (Selenium 불필요)
+  - URL 정규화를 통한 중복 감지 개선
+  - 기본소득당 제목에서 'New' 접두사 자동 제거
+  - 녹색당 다중 HTML 구조 파싱 지원
 
 - **2026-01-11**: Selenium 기반 JavaScript 렌더링 크롤러 추가
   - 조국혁신당, 진보당 본문 추출 성공
