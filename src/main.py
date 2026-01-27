@@ -641,16 +641,62 @@ def recover_text(text: str) -> str:
 
 
 DATE_RE = re.compile(r"(?:등록일\s*)?(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})")
+TIME_ONLY_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*$")  # "18:34" 같은 시간만 있는 경우
 
 
 def extract_date_from_text(text: str) -> Optional[str]:
     if not text:
         return None
     m = DATE_RE.search(text)
+    if m:
+        y, mth, d = m.groups()
+        return f"{y}-{int(mth):02d}-{int(d):02d}"
+
+    # 시간만 있는 경우 (예: "18:34") 오늘 날짜로 처리
+    if TIME_ONLY_RE.match(text):
+        from datetime import date
+        today = date.today()
+        return today.strftime("%Y-%m-%d")
+
+    return None
+
+
+# [M/D] 또는 [MM/DD] 형태의 날짜 패턴 (연도 없음)
+SHORT_DATE_RE = re.compile(r"\[(\d{1,2})/(\d{1,2})\]")
+
+
+def extract_date_from_title(title: str, reference_year: int = 2026) -> Optional[str]:
+    """제목에서 [M/D] 형태의 날짜를 추출하고 연도를 추정.
+
+    Args:
+        title: 제목 문자열 (예: "[1/27] 기자회견", "[12/29] 참사 1주기")
+        reference_year: 기준 연도 (기본값 2026)
+
+    Returns:
+        YYYY-MM-DD 형식의 날짜 문자열 또는 None
+    """
+    if not title:
+        return None
+
+    m = SHORT_DATE_RE.search(title)
     if not m:
         return None
-    y, mth, d = m.groups()
-    return f"{y}-{int(mth):02d}-{int(d):02d}"
+
+    month, day = int(m.group(1)), int(m.group(2))
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return None
+
+    # 현재 월 기준으로 연도 추정: 현재 1월인데 12월 날짜면 작년
+    from datetime import date
+    today = date.today()
+    current_month = today.month
+
+    if month > current_month + 1:  # 현재 월보다 2개월 이상 뒤면 작년으로 추정
+        year = reference_year - 1
+    else:
+        year = reference_year
+
+    return f"{year}-{month:02d}-{day:02d}"
 
 
 def clean_title_text(text: str) -> str:
@@ -718,73 +764,102 @@ def extract_href_from_attrs(attrs: dict) -> Optional[str]:
 
 
 def list_basicincomeparty(session: requests.Session, t: Target) -> List[ListItem]:
-    html = fetch_html(session, t.list_url)
-    soup = BeautifulSoup(html, "html.parser")
-
     out: List[ListItem] = []
     seen = set()
 
-    # The press page uses a KBoard list with external article links.
-    if "/news/press" in t.list_url:
-        for row in soup.select(".kboard-list tbody tr"):
-            a = row.select_one("td.kboard-list-title a[href]")
-            if not a:
-                continue
-            href = (a.get("href") or "").strip()
-            if not href:
-                continue
+    # 여러 페이지 크롤링 (최대 3페이지)
+    max_pages = 3
+    for page_num in range(1, max_pages + 1):
+        if page_num == 1:
+            page_url = t.list_url
+        else:
+            page_url = f"{t.list_url}?pageid={page_num}"
 
-            title = a.get_text(" ", strip=True)
-            # "New" 표시 제거
-            title = re.sub(r'\bNew\b', '', title, flags=re.IGNORECASE).strip()
-            if not title:
-                continue
+        html = fetch_html(session, page_url)
+        soup = BeautifulSoup(html, "html.parser")
 
-            date = None
-            date_el = row.select_one("td.kboard-list-date")
-            if date_el:
-                date = extract_date_from_text(date_el.get_text(" ", strip=True))
+        page_items = 0
 
-            if href in seen:
-                continue
-            seen.add(href)
-            out.append(
-                ListItem(
-                    party=t.party,
-                    category=t.category,
-                    title=title,
-                    url=href,
-                    date=date,
+        # The press page uses a KBoard list with external article links.
+        if "/news/press" in t.list_url:
+            for row in soup.select(".kboard-list tbody tr"):
+                a = row.select_one("td.kboard-list-title a[href]")
+                if not a:
+                    continue
+                href = (a.get("href") or "").strip()
+                if not href:
+                    continue
+
+                title = a.get_text(" ", strip=True)
+                # "New" 표시 제거
+                title = re.sub(r'\bNew\b', '', title, flags=re.IGNORECASE).strip()
+                if not title:
+                    continue
+
+                date = None
+                date_el = row.select_one("td.kboard-list-date")
+                if date_el:
+                    date = extract_date_from_text(date_el.get_text(" ", strip=True))
+
+                if href in seen:
+                    continue
+                seen.add(href)
+                out.append(
+                    ListItem(
+                        party=t.party,
+                        category=t.category,
+                        title=title,
+                        url=href,
+                        date=date,
+                    )
                 )
-            )
-        return out
+                page_items += 1
+        else:
+            # 브리핑 페이지도 KBoard 구조 사용
+            for row in soup.select(".kboard-list tbody tr"):
+                a = row.select_one("td.kboard-list-title a[href]")
+                if not a:
+                    continue
+                href = (a.get("href") or "").strip()
+                if not href:
+                    continue
 
-    for a in soup.select("a[href]"):
-        title = a.get_text(" ", strip=True)
-        # "New" 표시 제거
-        title = re.sub(r'\bNew\b', '', title, flags=re.IGNORECASE).strip()
-        href = a.get("href")
-        if not href:
-            continue
+                abs_url = urljoin(t.list_url, href)
+                parsed = urlparse(abs_url)
 
-        abs_url = urljoin(t.list_url, href)
-        parsed = urlparse(abs_url)
+                # KBoard real posts only
+                if parsed.path.rstrip("/") not in BASICINCOME_POST_PATHS:
+                    continue
+                q = parsed.query or ""
+                if "mod=document" not in q:
+                    continue
+                if not UID_RE.search(q):
+                    continue
 
-        # KBoard real posts only
-        if parsed.path.rstrip("/") not in BASICINCOME_POST_PATHS:
-            continue
-        q = parsed.query or ""
-        if "mod=document" not in q:
-            continue
-        if not UID_RE.search(q):
-            continue
+                title = a.get_text(" ", strip=True)
+                # "New" 표시 제거
+                title = re.sub(r'\bNew\b', '', title, flags=re.IGNORECASE).strip()
+                if not title:
+                    continue
 
-        key = abs_url
-        if not title or key in seen:
-            continue
-        seen.add(key)
+                # 날짜 추출
+                date = None
+                date_el = row.select_one("td.kboard-list-date")
+                if date_el:
+                    date = extract_date_from_text(date_el.get_text(" ", strip=True))
 
-        out.append(ListItem(party=t.party, category=t.category, title=title, url=abs_url))
+                if abs_url in seen:
+                    continue
+                seen.add(abs_url)
+
+                out.append(ListItem(party=t.party, category=t.category, title=title, url=abs_url, date=date))
+                page_items += 1
+
+        # 페이지에 항목이 없으면 더 이상 크롤링하지 않음
+        if page_items == 0:
+            break
+
+        time.sleep(0.5)  # 페이지 간 딜레이
 
     return out
 
@@ -1345,6 +1420,9 @@ def list_kgreens(session: requests.Session, t: Target) -> List[ListItem]:
         title = (title or "").strip()
         if not title or len(title) < 6:
             return
+        # 날짜가 없으면 제목에서 [M/D] 형태 추출 시도
+        if not date:
+            date = extract_date_from_title(title)
         seen.add(abs_url)
         out.append(ListItem(party=t.party, category=t.category, title=title, url=abs_url, date=date))
 
@@ -1536,7 +1614,7 @@ def main() -> int:
     p.add_argument("--sample", type=int, default=15, help="how many sample items to print")
     p.add_argument("--debug", default="", help="comma-separated site ids for diagnostics")
     p.add_argument("--notion", action="store_true", help="upload results to Notion database")
-    p.add_argument("--date-from", default="", help="filter items from this date (YYYY-MM-DD), e.g., 2026-01-01")
+    p.add_argument("--date-from", default="2026-01-01", help="filter items from this date (YYYY-MM-DD), default: 2026-01-01")
     args = p.parse_args()
 
     global DEBUG_SITES
@@ -1556,6 +1634,9 @@ def main() -> int:
 
     items = run_list_only(targets)
 
+    # Filter excluded URLs first
+    items = [it for it in items if it.url not in EXCLUDED_URLS and normalize_url(it.url) not in EXCLUDED_URLS]
+
     # Filter by date if specified
     if args.date_from:
         try:
@@ -1570,12 +1651,10 @@ def main() -> int:
                         if item_date >= cutoff_date:
                             filtered_items.append(it)
                     except ValueError:
-                        # If date parsing fails, keep the item (might be recent)
-                        filtered_items.append(it)
+                        # If date parsing fails, skip the item
                         skipped_no_date += 1
                 else:
-                    # If no date, keep the item (might be recent)
-                    filtered_items.append(it)
+                    # If no date, skip the item (can't verify it's recent)
                     skipped_no_date += 1
 
             original_count = len(items)
