@@ -506,6 +506,21 @@ def fetch_detail_for_notion(session: requests.Session, url: str) -> Tuple[Option
     return date, paragraphs
 
 
+# 카테고리 이름 통일 매핑: 원본 카테고리 → 노션 카테고리
+CATEGORY_MAP = {
+    "브리핑": "논평",
+    "논평브리핑": "논평",
+    "기자회견": "논평",
+    "모두발언": "논평",
+    "정책논평": "논평",
+    "활동보고": "논평",
+    "발언": "논평",
+    "브리핑룸": "논평",
+    # "논평"은 이미 "논평"이므로 별도 매핑 불필요
+    # "보도자료", "언론보도"는 그대로 유지
+}
+
+
 def upload_to_notion(items: List[ListItem]) -> None:
     token = os.environ.get("NOTION_TOKEN", "").strip()
     database_id = os.environ.get("NOTION_DATABASE_ID", "").strip()
@@ -541,6 +556,18 @@ def upload_to_notion(items: List[ListItem]) -> None:
     for it in items:
         if not it.title or not it.url:
             continue
+
+        # 카테고리 이름 통일
+        mapped_cat = CATEGORY_MAP.get(it.category, it.category)
+        if mapped_cat != it.category:
+            it = ListItem(
+                party=it.party,
+                category=mapped_cat,
+                title=it.title,
+                url=it.url,
+                date=it.date,
+                content=it.content,
+            )
 
         # URL 정규화하여 중복 체크
         normalized = normalize_url(it.url)
