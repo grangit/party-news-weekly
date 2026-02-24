@@ -802,7 +802,8 @@ def list_basicincomeparty(session: requests.Session, t: Target) -> List[ListItem
     out: List[ListItem] = []
     seen = set()
 
-    BASICINCOME_DATE_RE = re.compile(r"(\d{4})\.(\d{2})\.(\d{2})")
+    # YY.MM.DD. 또는 YYYY.MM.DD. 형식 모두 지원
+    BASICINCOME_DATE_RE = re.compile(r"(\d{2,4})\.(\d{2})\.(\d{2})")
 
     max_pages = 3
     for page_num in range(1, max_pages + 1):
@@ -832,9 +833,15 @@ def list_basicincomeparty(session: requests.Session, t: Target) -> List[ListItem
             if not title:
                 continue
 
-            # 카테고리 (논평/보도자료)
+            # 카테고리 (논평/보도자료): 첫 번째 td 또는 a.bo_cate_link
             cate_a = row.select_one("a.bo_cate_link")
-            category = cate_a.get_text(strip=True) if cate_a else t.category
+            cols_all = row.find_all("td")
+            if cate_a:
+                category = cate_a.get_text(strip=True)
+            elif cols_all:
+                category = cols_all[0].get_text(strip=True)
+            else:
+                category = t.category
 
             # 날짜: 마지막 td (YYYY.MM.DD. 형식)
             cols = row.find_all("td")
@@ -843,7 +850,10 @@ def list_basicincomeparty(session: requests.Session, t: Target) -> List[ListItem
                 date_text = cols[-1].get_text(strip=True)
                 m = BASICINCOME_DATE_RE.search(date_text)
                 if m:
-                    date = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+                    year = m.group(1)
+                    if len(year) == 2:
+                        year = f"20{year}"
+                    date = f"{year}-{m.group(2)}-{m.group(3)}"
 
             if abs_url in seen:
                 continue
@@ -1532,11 +1542,15 @@ def list_justice21(session: requests.Session, t: Target) -> List[ListItem]:
             continue
         seen.add(abs_url)
 
-        # Try to extract date from the parent row/list item
+        # Try to extract date from the parent row's last td (date column)
         date = None
-        parent = a.find_parent(['tr', 'li', 'div'])
-        if parent:
-            date = extract_date_from_text(parent.get_text(" ", strip=True))
+        parent_tr = a.find_parent('tr')
+        if parent_tr:
+            tds = parent_tr.find_all('td')
+            if tds:
+                # 마지막 td가 날짜/시간 컬럼
+                date_text = tds[-1].get_text(strip=True)
+                date = extract_date_from_text(date_text)
 
         out.append(ListItem(party=t.party, category=t.category, title=title, url=abs_url, date=date))
 
